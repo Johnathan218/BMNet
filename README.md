@@ -56,6 +56,24 @@ To test BMNet at a compression ratio of 16:
 python eval.py --image_size 512 512 --cs_ratio 4 4 --data_path /data2/wangzhibin/DOTA/valsplit512_nogap/images/ --model_path ./model_ckpt/2024_12_11_22_07_45/model_best.pth --num_shows 10 --results_path ./results/
 ```
 
+### Measurement quantization
+A measurement sums about `N/2` modulated pixels, so it spans a wider dynamic range
+than an 8-bit source pixel. Quantizing it back to `b` bits is what turns the
+sample-count ratio `Cr = N` into a bitrate of `b/Cr` bpp. Quantization is **off by
+default**; the measurement is then float and no bitrate is defined. To enable it:
+```
+python eval.py --cs_ratio 4 4 --data_path ... --model_path ... --quant_meas --quant_bits 8
+```
+`--quant_range` selects the range over which the levels are laid out: `global`
+(default) uses the analytic bound `[0, N]`, while `phisum` uses the exact
+per-position bound and recovers roughly one bit at no cost in side information,
+since the mask is known at both ends. To sweep bit depths:
+```
+for b in 8 10 12; do python eval.py --cs_ratio 4 4 --data_path ... --model_path ... --quant_meas --quant_bits $b; done
+```
+The same three flags exist in `train.py` for quantization-aware fine-tuning, which
+is only needed if post-hoc quantization at the target bit depth costs accuracy.
+
 ## Citation
 If you find the code helpful in your resarch or work, please consider citing:
 ```

@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from PIL import Image
 
-from utils import PSNR, SSIM, time2file_name, AverageMeter
+from utils import PSNR, SSIM, time2file_name, AverageMeter, measurement_vmax, quantize_measurement
 from data.dotadataset import make_dataset
 from network.BMNet import BMNet
 
@@ -32,6 +32,11 @@ parser.add_argument("--cs_ratio", type=int, nargs='+', default=[4, 4], help="com
 parser.add_argument("--num_show", type=int, default=1, help="number of images to show")
 
 parser.add_argument('--seed', type=int, default=42, help='random seed')
+
+parser.add_argument('--quant_meas', action='store_true', help='quantize the measurement before decoding')
+parser.add_argument('--quant_bits', type=int, default=8, help='bit depth of the quantized measurement')
+parser.add_argument('--quant_range', type=str, default='global', choices=['global', 'phisum'],
+                    help="quantization range: 'global' uses [0, N], 'phisum' uses the per-position bound")
 
 args = parser.parse_args()
 
@@ -93,6 +98,10 @@ def eval():
 
         meas = torch.sum(input_img * input_mask, dim=1, keepdim=True)
 
+        if args.quant_meas:
+            vmax = measurement_vmax(input_mask, args.quant_range, cr1 * cr2)
+            meas = quantize_measurement(meas, args.quant_bits, vmax)
+
         with torch.no_grad():
             torch.cuda.synchronize()
             st = time.time()
@@ -128,6 +137,12 @@ def eval():
 
             show_test = show_test - 1
 
+    n_fold = cr1 * cr2
+    if args.quant_meas:
+        print("measurement: %d-bit, %s range, Cr = %d, bitrate = %.4f bpp"
+              % (args.quant_bits, args.quant_range, n_fold, args.quant_bits / n_fold))
+    else:
+        print("measurement: float32 (unquantized), Cr = %d, no defined bitrate" % n_fold)
     print("test psnr: %.4f" % psnr_avg_meter.avg)
     print("test ssim: %.4f" % ssim_avg_meter.avg)
     print("avg throughput: %.4f s/image" % time_avg_meter.avg)

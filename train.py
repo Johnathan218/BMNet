@@ -18,7 +18,7 @@ from apex import amp
 from apex.parallel import DistributedDataParallel as DDP
 
 from data.dotadataset import make_dataset
-from utils import batch_PSNR, time2file_name, AverageMeter
+from utils import batch_PSNR, time2file_name, AverageMeter, measurement_vmax, quantize_measurement
 from network.BMNet import BMNet
 from timm.scheduler import CosineLRScheduler
 import einops
@@ -47,6 +47,11 @@ parser.add_argument("--data_path", type=str, default="/data2/wangzhibin/DOTA/tra
 parser.add_argument('--save_dir', type=str, default='./model_ckpt', help='output dir')
 parser.add_argument('--finetune', type=str, default=None, help='resume path')
 parser.add_argument('--resume', type=str, default=None, help='resume path')
+
+parser.add_argument('--quant_meas', action='store_true', help='quantize the measurement before decoding')
+parser.add_argument('--quant_bits', type=int, default=8, help='bit depth of the quantized measurement')
+parser.add_argument('--quant_range', type=str, default='global', choices=['global', 'phisum'],
+                    help="quantization range: 'global' uses [0, N], 'phisum' uses the per-position bound")
 
 parser.add_argument('--opt-level', type=str, default='O0', help='use fp32 or fp16')
 parser.add_argument("--local_rank", default=0, type=int)
@@ -213,6 +218,10 @@ def main():
 
             meas = torch.sum(input_img * input_mask, dim=1, keepdim=True)
 
+            if args.quant_meas:
+                vmax = measurement_vmax(input_mask, args.quant_range, cr1 * cr2)
+                meas = quantize_measurement(meas, args.quant_bits, vmax)
+
             out_train = model(meas, input_mask)
 
             if args.resize_size:
@@ -272,6 +281,10 @@ def main():
                 else:
                     input_mask = model.mask.unsqueeze(0).expand(bs, -1, -1, -1, -1) * model.scaler
                 meas = torch.sum(input_img * input_mask, dim=1, keepdim=True)
+
+                if args.quant_meas:
+                    vmax = measurement_vmax(input_mask, args.quant_range, cr1 * cr2)
+                    meas = quantize_measurement(meas, args.quant_bits, vmax)
 
                 if show_test:
                     test = meas[0, :]

@@ -39,6 +39,35 @@ def At_operator(z, Phi):
     return y
 
 
+def measurement_vmax(Phi, mode, n_fold):
+    """Upper bound of the measurement, used to lay out the quantization levels.
+
+    'global' is the analytic bound N obtained when every mask entry passes light
+    and every pixel saturates. 'phisum' is the exact per-position bound, which is
+    tighter and still needs no side information because the mask is known at both
+    ends. Both are clip-free for pixels in [0, 1].
+    """
+    if mode == 'phisum':
+        return torch.sum(Phi * Phi, 1, keepdim=True)
+    return float(n_fold)
+
+
+def quantize_measurement(meas, bits, vmax):
+    """Uniformly quantize the BMI measurement to `bits` bits over [0, vmax].
+
+    The encoder sums about N/2 modulated pixels, so a measurement spans a wider
+    dynamic range than a source pixel and does not fit in the 8 bits of the input
+    image. Quantizing it back is what turns the sample-count ratio Cr = N into a
+    bitrate of bits/Cr bpp. A straight-through estimator keeps the op usable for
+    quantization-aware fine-tuning; under no_grad it is numerically an identity.
+    """
+    levels = 2 ** bits - 1
+    scale = torch.as_tensor(vmax, dtype=meas.dtype, device=meas.device) / levels
+    scale = torch.where(scale > 0, scale, torch.ones_like(scale))
+    q = torch.round(meas / scale).clamp(0, levels) * scale
+    return meas + (q - meas).detach()
+
+
 def time2file_name(time):
     year = time[0:4]
     month = time[5:7]
